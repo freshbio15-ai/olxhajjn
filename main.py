@@ -119,9 +119,19 @@ async def main() -> None:
     scheduler = Scheduler(bot)
     scheduler.start()
 
+    # Kill any existing polling/webhook session before starting.
+    # This prevents TelegramConflictError when Render briefly runs
+    # two instances during a rolling deploy.
+    logger.info("Clearing existing Telegram sessions…")
+    await bot.delete_webhook(drop_pending_updates=True)
+
     logger.info("Starting bot polling…")
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            drop_pending_updates=True,
+        )
     finally:
         scheduler.stop()
         await bot.session.close()
