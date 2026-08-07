@@ -1,20 +1,20 @@
 """
 /stats handler — shows current statistics with delta vs previous snapshot.
+Responds to both /stats command and "📊 Статистика" keyboard button.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from bot.keyboards import main_keyboard
 from database.models import Stat
 from database.repository import Repository
 
-logger = logging.getLogger(__name__)
 router = Router(name="stats")
 
 
@@ -26,42 +26,39 @@ def _delta(current: int, previous: Optional[int]) -> str:
         return f" <b>(+{diff})</b>"
     if diff < 0:
         return f" <i>({diff})</i>"
-    return " (±0)"
+    return " <i>(±0)</i>"
 
 
-def format_stat_block(
-    item_title: str,
-    item_url: str,
+def _format_stat_block(
+    title: str,
+    url: str,
     latest: Optional[Stat],
     previous: Optional[Stat],
 ) -> str:
     if latest is None:
         return (
-            f"📌 <b>{item_title}</b>\n"
-            f"   🔗 <a href=\"{item_url}\">посилання</a>\n"
-            f"   ⏳ Ще не перевірялось\n"
+            f'📌 <b>{title}</b>\n'
+            f'   🔗 <a href="{url}">посилання</a>\n'
+            f"   ⏳ Дані ще не зібрано — зачекайте наступної перевірки.\n"
         )
 
-    prev_views = previous.views_count if previous else None
-    prev_fav = previous.favorites_count if previous else None
-    prev_ph = previous.phone_clicks_count if previous else None
-
+    pv = previous.views_count if previous else None
+    pf = previous.favorites_count if previous else None
+    pp = previous.phone_clicks_count if previous else None
     ts = latest.timestamp.strftime("%d.%m.%Y %H:%M") if latest.timestamp else "—"
 
     return (
-        f"📌 <b>{item_title}</b>\n"
-        f"   🔗 <a href=\"{item_url}\">посилання</a>\n"
-        f"   👁 Перегляди: <code>{latest.views_count}</code>"
-        f"{_delta(latest.views_count, prev_views)}\n"
-        f"   ⭐ Обране: <code>{latest.favorites_count}</code>"
-        f"{_delta(latest.favorites_count, prev_fav)}\n"
-        f"   📞 Кліки на телефон: <code>{latest.phone_clicks_count}</code>"
-        f"{_delta(latest.phone_clicks_count, prev_ph)}\n"
+        f'📌 <b>{title}</b>\n'
+        f'   🔗 <a href="{url}">посилання</a>\n'
+        f"   👁 Перегляди: <code>{latest.views_count}</code>{_delta(latest.views_count, pv)}\n"
+        f"   ⭐ Обране: <code>{latest.favorites_count}</code>{_delta(latest.favorites_count, pf)}\n"
+        f"   📞 Кліки на телефон: <code>{latest.phone_clicks_count}</code>{_delta(latest.phone_clicks_count, pp)}\n"
         f"   🕐 Оновлено: {ts}\n"
     )
 
 
 @router.message(Command("stats"))
+@router.message(F.text == "📊 Статистика")
 async def cmd_stats(message: Message, repo: Repository) -> None:
     user = message.from_user
     if user is None:
@@ -70,20 +67,22 @@ async def cmd_stats(message: Message, repo: Repository) -> None:
     items = await repo.get_items_by_user(user.id)
     if not items:
         await message.answer(
-            "📊 Список оголошень порожній.\n"
-            "Додайте оголошення командою /add &lt;назва&gt; &lt;посилання&gt;",
+            "📊 Список порожній.\n\n"
+            "Натисніть <b>➕ Додати оголошення</b> або вставте посилання OLX.",
             parse_mode="HTML",
+            reply_markup=main_keyboard(),
         )
         return
 
-    blocks = ["📊 <b>Статистика оголошень:</b>\n"]
+    blocks = [f"📊 <b>Статистика ({len(items)} оголошень):</b>\n"]
     for item in items:
         latest = await repo.get_latest_stat(item.id)
         previous = await repo.get_previous_stat(item.id)
-        blocks.append(format_stat_block(item.title, item.olx_url, latest, previous))
+        blocks.append(_format_stat_block(item.title, item.olx_url, latest, previous))
 
     await message.answer(
         "\n".join(blocks),
         parse_mode="HTML",
         disable_web_page_preview=True,
+        reply_markup=main_keyboard(),
     )
