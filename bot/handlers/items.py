@@ -29,6 +29,7 @@ from bot.keyboards import (
     main_keyboard,
 )
 from bot.states import AddItem
+from database.models import async_session as new_session
 from database.repository import Repository
 from scraper.olx import OLXScraper
 
@@ -41,22 +42,28 @@ OLX_URL_RE = re.compile(r"https?://(?:www\.)?olx\.ua\S+", re.IGNORECASE)
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 
-async def _force_scrape_and_save(repo: Repository, item_id: int, url: str) -> str:
+async def _force_scrape_and_save(item_id: int, url: str) -> str:
     """
-    Immediately scrapes stats for the given URL and saves a snapshot.
-    Returns a formatted string with the scraped stats (or a note if failed).
+    Scrapes OLX stats and persists them in an INDEPENDENT session with
+    its own immediate commit — completely decoupled from the handler's
+    middleware session so the snapshot is guaranteed to be in the DB.
     """
     try:
         async with OLXScraper() as scraper:
             result = await scraper.fetch_stats(url)
 
         if result.success:
-            await repo.save_stat(
-                item_id=item_id,
-                views=result.views,
-                favorites=result.favorites,
-                phone_clicks=result.phone_clicks,
-            )
+            # Own session → own commit → no dependency on middleware timing
+            async with new_session() as session:
+                repo = Repository(session)
+                await repo.save_stat(
+                    item_id=item_id,
+                    views=result.views,
+                    favorites=result.favorites,
+                    phone_clicks=result.phone_clicks,
+                )
+                await session.commit()
+
             return (
                 f"\n\n📊 <b>Перша статистика:</b>\n"
                 f"   👁 Перегляди: <code>{result.views}</code>\n"
@@ -65,11 +72,17 @@ async def _force_scrape_and_save(repo: Repository, item_id: int, url: str) -> st
             )
         else:
             logger.warning("Force scrape failed for item %d: %s", item_id, result.error)
-            return f"\n\n⚠️ Статистику не вдалось завантажити ({result.error}). Спробую при наступній перевірці."
+            return (
+                f"\n\n⚠️ OLX не дав статистику ({result.error}).\n"
+                "Перша статистика прийде при наступній перевірці (до 2 год)."
+            )
 
     except Exception as exc:
         logger.warning("Force scrape exception for item %d: %s", item_id, exc)
-        return "\n\n⚠️ Статистику не вдалось завантажити. Спробую при наступній перевірці."
+        return (
+            "\n\n⚠️ Не вдалось завантажити статистику.\n"
+            "Перша статистика прийде при наступній перевірці (до 2 год)."
+        )
 
 
 async def _finalize_add(
@@ -79,8 +92,7 @@ async def _finalize_add(
     title: str,
 ) -> None:
     """
-    Persist item + immediately scrape stats + reply with result.
-    Called from both FSM step-2 and the auto-detect flow.
+    Persist item → commit immediately → scrape stats in own session → reply.
     """
     user = message.from_user
     if user is None:
@@ -106,9 +118,12 @@ async def _finalize_add(
         )
         return
 
-    # Immediately scrape stats for the newly added item
+    # ── Commit the item IMMEDIATELY so FK is valid for the stat insert ────────
+    await repo._s.commit()
+
+    # ── Scrape stats in a separate session with its own commit ─────────────────
     loading = await message.answer("🔍 Завантажую першу статистику…")
-    stats_text = await _force_scrape_and_save(repo, item.id, url)
+    stats_text = await _force_scrape_and_save(item.id, url)
     try:
         await loading.delete()
     except Exception:
