@@ -144,7 +144,7 @@ async def cancel_add(message: Message, state: FSMContext) -> None:
 
 @router.message(
     StateFilter(AddItem.waiting_for_url),
-    F.text.regexp(r"https?://(?:www\.)?olx\.ua", re.IGNORECASE),
+    F.text.regexp(r"(?i)https?://(?:www\.)?olx\.ua"),
 )
 async def process_url_in_state(
     message: Message, state: FSMContext, repo: Repository
@@ -177,7 +177,7 @@ async def process_non_url_in_state(message: Message) -> None:
 
 @router.message(
     StateFilter(default_state),
-    F.text.regexp(r"https?://(?:www\.)?olx\.ua", re.IGNORECASE),
+    F.text.regexp(r"(?i)https?://(?:www\.)?olx\.ua"),
 )
 async def auto_add_url(message: Message, repo: Repository) -> None:
     """User pastes an OLX URL without pressing any button — just add it."""
