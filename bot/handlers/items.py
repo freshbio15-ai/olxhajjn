@@ -214,6 +214,17 @@ async def got_title_in_state(
     url: str = data.get("url", "")
     title = (message.text or "").strip()
 
+    # Guard: user typed a URL instead of a name — don't clear state, ask again
+    if title.startswith("http") or "olx.ua" in title:
+        await message.answer(
+            "⚠️ Це посилання, а не назва!\n\n"
+            "✏️ Введіть коротку <b>назву</b> для оголошення:\n"
+            "<i>Наприклад: Колаген, Rayban Meta, Gymshark…</i>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
+        return
+
     await state.clear()
 
     if not title:

@@ -340,6 +340,9 @@ def _parse_html(html: str, url: str) -> OLXStats:
 
     if not stats.views:
         for p in [
+            # OLX Ukraine exact element: <span data-testid="page-view-counter">Переглядів: 331</span>
+            r'data-testid=["\']page-view-counter["\'][^>]*>[^\d]*(\d+)<',
+            r'data-testid=["\']page-view-counter["\'][^>]*>Переглядів:\s*(\d+)<',
             r'"viewCount"\s*:\s*(\d+)',
             r'"views"\s*:\s*(\d+)',
             r'(\d+)\s*(?:перегляд|переглядів)',
